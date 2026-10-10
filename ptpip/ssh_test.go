@@ -171,3 +171,30 @@ func splitHostPort(addr string) (string, int, error) {
 	n, err := strconv.Atoi(p)
 	return h, n, err
 }
+
+// The SSH channel fakes read deadlines with a closing timer; an idle session
+// must survive longer than IOTimeout.
+func TestSSHIdleOutlivesIOTimeout(t *testing.T) {
+	_, ssh := sshSetup(t)
+	_, port, _ := splitHostPort(ssh.Addr())
+	d := ptpip.NewSSHDialer(ptpip.SSHConfig{User: "user", Password: "secret", Fingerprint: ssh.Fingerprint, Port: port})
+	defer d.Close()
+	c, err := ptpip.Dial(context.Background(), "127.0.0.1:15740", ptpip.Options{DialContext: d.DialContext, IOTimeout: 300 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ctx := context.Background()
+	if _, err := c.GetDeviceInfo(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(900 * time.Millisecond)
+	select {
+	case <-c.Done():
+		t.Fatalf("session died while idle: %v", c.Err())
+	default:
+	}
+	if _, err := c.GetDeviceInfo(ctx); err != nil {
+		t.Fatalf("after idle: %v", err)
+	}
+}

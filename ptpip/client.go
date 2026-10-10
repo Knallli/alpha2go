@@ -130,7 +130,11 @@ func Dial(ctx context.Context, addr string, opts Options) (*Client, error) {
 
 func (c *Client) readCmd() (packet, error) {
 	c.cmd.SetReadDeadline(time.Now().Add(c.opts.IOTimeout))
-	return readPacket(c.cmd)
+	p, err := readPacket(c.cmd)
+	// The SSH channel emulates deadlines with a timer that closes the channel;
+	// left armed it would kill an idle session IOTimeout after the last reply.
+	c.cmd.SetReadDeadline(time.Time{})
+	return p, err
 }
 
 func (c *Client) initCommand() error {
