@@ -180,7 +180,15 @@ func (c *Client) SonyGetContentsInfoList(ctx context.Context, slot uint32, after
 }
 
 // SonyListAllContents pages through the whole slot, deduplicated by content ID.
+//
+// An empty or missing slot answers the date list (0x923B) with
+// InvalidParameter but leaves a contents list request (0x923C) unanswered
+// until the I/O timeout, which ends the session. So the date list goes first
+// and its error is returned as is.
 func (c *Client) SonyListAllContents(ctx context.Context, slot uint32) ([]SonyContent, error) {
+	if _, err := c.SonyGetCapturedDateList(ctx, slot); err != nil {
+		return nil, err
+	}
 	const maxPages = 10000
 	var all []SonyContent
 	seen := map[uint32]bool{}
