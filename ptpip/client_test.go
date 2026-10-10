@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -202,5 +205,33 @@ func TestParseDate(t *testing.T) {
 	}
 	if _, err := ptpip.ParseDate("2026", time.UTC); err == nil {
 		t.Error("expected error for short date")
+	}
+}
+
+func TestTrace(t *testing.T) {
+	srv, err := ptpiptest.Start(ptpiptest.Options{Dir: card(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	var mu sync.Mutex
+	var phases []string
+	c, err := ptpip.Dial(context.Background(), srv.Addr(), ptpip.Options{IOTimeout: 5 * time.Second, Trace: func(e ptpip.TraceEvent) {
+		mu.Lock()
+		phases = append(phases, fmt.Sprintf("%s:%#x", e.Phase, e.Op))
+		mu.Unlock()
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.GetDeviceInfo(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"queued:0x1001", "start:0x1001", "end:0x1001"}
+	if !slices.Equal(phases, want) {
+		t.Fatalf("got %v, want %v", phases, want)
 	}
 }

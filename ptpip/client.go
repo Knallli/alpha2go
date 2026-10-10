@@ -21,6 +21,18 @@ type Options struct {
 	// DialContext opens the command and event connections. Default: TCP.
 	// Cameras with Access Authentication on need an SSH tunnel (see SSHDialer).
 	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	// Trace, if set, is called for every operation when it is queued, when it
+	// starts on the wire and when it ends. It must not block.
+	Trace func(TraceEvent)
+}
+
+// TraceEvent describes one step of an operation for Options.Trace.
+type TraceEvent struct {
+	Op     uint16
+	Params []uint32
+	Phase  string        // "queued", "start" or "end"
+	Dur    time.Duration // start: time spent waiting for the connection; end: time on the wire
+	Err    error         // end only
 }
 
 // InitFailError is returned when the camera refuses the PTP/IP handshake,
@@ -257,14 +269,24 @@ func (c *Client) Transaction(ctx context.Context, op uint16, params []uint32, se
 // transaction is Transaction; pace > 0 sends the data phase the way the camera
 // expects for a settings restore: pauses between request, StartData, one
 // Data packet and an EndData that carries only the transaction ID.
-func (c *Client) transaction(ctx context.Context, op uint16, params []uint32, send []byte, recv io.Writer, pace time.Duration) ([]uint32, error) {
+func (c *Client) transaction(ctx context.Context, op uint16, params []uint32, send []byte, recv io.Writer, pace time.Duration) (out []uint32, err error) {
 	select {
 	case <-c.done:
 		return nil, c.Err()
 	default:
 	}
+	tr := c.opts.Trace
+	queued := time.Now()
+	if tr != nil {
+		tr(TraceEvent{Op: op, Params: params, Phase: "queued"})
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if tr != nil {
+		started := time.Now()
+		tr(TraceEvent{Op: op, Params: params, Phase: "start", Dur: started.Sub(queued)})
+		defer func() { tr(TraceEvent{Op: op, Params: params, Phase: "end", Dur: time.Since(started), Err: err}) }()
+	}
 
 	// A cancelled context breaks the connection: PTP/IP has no reliable way
 	// to abort an in-flight transfer, and the caller reconnects.

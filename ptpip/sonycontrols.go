@@ -129,3 +129,23 @@ func (c *Client) SonyToggleMovie(ctx context.Context) error {
 		return release(SonyCtlMovie)
 	})
 }
+
+// SonyPressButton presses and releases a camera button (an id from 0xD208,
+// e.g. 5 = enter). The release is sent even when the press failed or ctx ended.
+func (c *Client) SonyPressButton(ctx context.Context, button uint16) (err error) {
+	send := func(ctx context.Context, state int64) error {
+		return c.SonyControl(ctx, SonyCtlButton, 6, SonyValue{Int: int64(button)<<16 | state})
+	}
+	defer func() {
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		err = errors.Join(err, send(rctx, sonyReleased))
+	}()
+	return send(ctx, sonyPressed)
+}
+
+// SonyTurnDial turns a dial (an id from 0xD20A, e.g. 0x4002 = front dial) by
+// steps; positive is clockwise.
+func (c *Client) SonyTurnDial(ctx context.Context, dial uint16, steps int16) error {
+	return c.SonyControl(ctx, SonyCtlDial, 5, SonyValue{Int: int64(dial)<<16 | int64(uint16(steps))})
+}

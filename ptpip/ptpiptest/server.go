@@ -610,7 +610,7 @@ func (s *Server) op(sess *session, op uint16, params []uint32) (uint16, []uint32
 			s.captured = append(s.captured, CapturedImage)
 		}
 		s.mu.Unlock()
-		if code == s.opts.FailControl && v.Int == 2 {
+		if code == s.opts.FailControl && v.Int&0xFFFF == 2 {
 			return 0x2002, nil, nil, nil // GeneralError
 		}
 		return ptpip.RespOK, nil, nil, nil

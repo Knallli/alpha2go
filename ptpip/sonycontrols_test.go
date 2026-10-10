@@ -84,3 +84,31 @@ func TestSonyControlTable(t *testing.T) {
 		}
 	}
 }
+
+func TestSonyPressButtonAndDial(t *testing.T) {
+	srv, c := controlClient(t, 0)
+	ctx := context.Background()
+	if err := c.SonyPressButton(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SonyTurnDial(ctx, 0x4002, -1); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SonyTurnDial(ctx, 0x4002, 1); err != nil {
+		t.Fatal(err)
+	}
+	wantControls(t, srv,
+		ptpiptest.ControlCall{Code: 0xD309, Value: 5<<16 | 2}, ptpiptest.ControlCall{Code: 0xD309, Value: 5<<16 | 1},
+		ptpiptest.ControlCall{Code: 0xD30B, Value: 0x4002FFFF}, ptpiptest.ControlCall{Code: 0xD30B, Value: 0x40020001})
+}
+
+func TestSonyPressButtonReleasesOnFailure(t *testing.T) {
+	srv, c := controlClient(t, 0xD309)
+	if err := c.SonyPressButton(context.Background(), 5); err == nil {
+		t.Fatal("want error")
+	}
+	got := srv.Controls()
+	if len(got) == 0 || got[len(got)-1] != (ptpiptest.ControlCall{Code: 0xD309, Value: 5<<16 | 1}) {
+		t.Fatalf("button not released last: %v", got)
+	}
+}
