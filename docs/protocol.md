@@ -175,7 +175,9 @@ These operations work in the remote mode. The camera UI stays usable.
 | 0x923D | content ID, `slot<<24 \| file ID`, offset low, offset high, `size \| last<<31` | file bytes |
 | 0x923E | content ID, `slot<<24 \| file ID`, 1 thumbnail / 2 screennail | the image, no header |
 
-- Slot 2 returns InvalidParameter on the single-slot a6700.
+- Slot 2 returns InvalidParameter on the single-slot a6700. alpha2go wraps InvalidParameter and StoreNotAvailable of the date list (0x923B) in `ErrSlotEmpty`; on 0x923C pages they stay plain errors, so a stale cursor never looks like an empty card.
+- In some camera states all four operations answer OperationNotSupported (0x2005) for both slots although the camera lists them; the session stays usable. Seen in the field, cause not pinned down yet (candidates: menu or playback open on the camera, card being written, another app connected). Retrying at once gets the same answer, so do not loop. alpha2go wraps OperationNotSupported and DeviceBusy in `ErrCardUnavailable`.
+- When 0x923B reports `n = 0`, `SonyListAllContents` sends no 0x923C (the contents list is where a slot without contents stalls).
 - **0x923C paging:** the cursor 0 starts at the beginning. The next page uses the creation UTC (ms) of the last content as cursor. alpha2go treats a page with fewer than 100 contents as the last one.
 - **0x923D:** bit 31 of the size marks the last chunk (offset + size ≥ file size). The response parameters are a u64 ms timestamp of unknown meaning.
 - **0x923E on the a6700:** `.ARW` thumbnail = 160×120 JPEG; `.HIF` thumbnail = 320×212 HEIF; screennail = 1616×1080 HEIF.

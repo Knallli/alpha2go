@@ -150,12 +150,42 @@ func EncodeSonyContentsInfoList(cs []SonyContent) []byte {
 	return b
 }
 
+// Errors of the contents operations (0x923B-0x923E). They wrap the PTP
+// error, so IsCode still works.
+var (
+	// ErrSlotEmpty: no card in the slot, or the camera has only one slot
+	// (InvalidParameter, StoreNotAvailable).
+	ErrSlotEmpty = errors.New("no memory card in this slot")
+	// ErrCardUnavailable: the camera refuses card access right now
+	// (OperationNotSupported, DeviceBusy). The session itself stays usable;
+	// retrying at once gets the same answer.
+	ErrCardUnavailable = errors.New("the camera does not allow card access right now")
+)
+
+// cardErr classifies the answer of a contents operation.
+func cardErr(err error) error {
+	if IsCode(err, RespOperationNotSupported) || IsCode(err, RespDeviceBusy) {
+		return fmt.Errorf("%w: %w", ErrCardUnavailable, err)
+	}
+	return err
+}
+
+// listErr is cardErr for the date list, where InvalidParameter means the slot
+// (on a contents page or a download it can mean a stale cursor or ID instead,
+// and must not look like an empty card).
+func listErr(err error) error {
+	if IsCode(err, RespInvalidParameter) || IsCode(err, RespStoreNotAvailable) {
+		return fmt.Errorf("%w: %w", ErrSlotEmpty, err)
+	}
+	return cardErr(err)
+}
+
 // SonyGetCapturedDateList returns the capture dates of a slot (0x923B). Like
 // the Created/Modified*Local times they are camera wall-clock time stored as UTC.
 func (c *Client) SonyGetCapturedDateList(ctx context.Context, slot uint32) ([]time.Time, error) {
 	var buf bytes.Buffer
 	if _, err := c.Transaction(ctx, OpSonyGetCapturedDateList, []uint32{slot}, nil, &buf); err != nil {
-		return nil, err
+		return nil, listErr(err)
 	}
 	r := &reader{b: buf.Bytes()}
 	n := int(r.u32())
@@ -174,7 +204,7 @@ func (c *Client) SonyGetCapturedDateList(ctx context.Context, slot uint32) ([]ti
 func (c *Client) SonyGetContentsInfoList(ctx context.Context, slot uint32, after uint64) ([]SonyContent, error) {
 	var buf bytes.Buffer
 	if _, err := c.Transaction(ctx, OpSonyGetContentsInfoList, []uint32{uint32(after), uint32(after >> 32), sonyListPageSize, slot, 0}, nil, &buf); err != nil {
-		return nil, err
+		return nil, cardErr(err)
 	}
 	return parseSonyContentsInfoList(buf.Bytes())
 }
@@ -183,11 +213,17 @@ func (c *Client) SonyGetContentsInfoList(ctx context.Context, slot uint32, after
 //
 // An empty or missing slot answers the date list (0x923B) with
 // InvalidParameter but leaves a contents list request (0x923C) unanswered
-// until the I/O timeout, which ends the session. So the date list goes first
-// and its error is returned as is.
+// until the I/O timeout, which ends the session. So the date list goes first;
+// it also answers how many contents there are, and an empty slot needs no
+// contents request at all. Its errors are ErrSlotEmpty or ErrCardUnavailable
+// where they apply.
 func (c *Client) SonyListAllContents(ctx context.Context, slot uint32) ([]SonyContent, error) {
-	if _, err := c.SonyGetCapturedDateList(ctx, slot); err != nil {
+	dates, err := c.SonyGetCapturedDateList(ctx, slot)
+	if err != nil {
 		return nil, err
+	}
+	if len(dates) == 0 {
+		return nil, nil
 	}
 	const maxPages = 10000
 	var all []SonyContent
@@ -226,7 +262,7 @@ func (c *Client) SonyGetContentsData(ctx context.Context, slot, contentID uint32
 	}
 	cw := &countingWriter{w: w}
 	_, err := c.Transaction(ctx, OpSonyGetContentsData, []uint32{contentID, slot<<24 | uint32(fileID), uint32(offset), uint32(offset >> 32), size}, nil, cw)
-	return uint32(cw.n), err
+	return uint32(cw.n), cardErr(err)
 }
 
 // 0x923E data types.
@@ -240,7 +276,7 @@ const (
 func (c *Client) SonyGetContentsCompressed(ctx context.Context, slot, contentID uint32, fileID uint16, typ uint32, w io.Writer) (int64, error) {
 	cw := &countingWriter{w: w}
 	_, err := c.Transaction(ctx, OpSonyGetContentsCompressedData, []uint32{contentID, slot<<24 | uint32(fileID), typ}, nil, cw)
-	return cw.n, err
+	return cw.n, cardErr(err)
 }
 
 // SonyDownloadContentFile transfers a whole file in 4 MiB chunks.

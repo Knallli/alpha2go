@@ -3,7 +3,9 @@ package ptpip_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,8 +63,35 @@ func TestSonyListAllContentsPaging(t *testing.T) {
 	if err != nil || len(dates) != 250 {
 		t.Fatalf("got %d dates, err %v", len(dates), err)
 	}
-	if _, err := c.SonyListAllContents(context.Background(), 2); !ptpip.IsCode(err, 0x201D) {
+	if _, err := c.SonyListAllContents(context.Background(), 2); !ptpip.IsCode(err, 0x201D) || !errors.Is(err, ptpip.ErrSlotEmpty) {
 		t.Fatalf("slot 2: %v", err)
+	}
+}
+
+func TestSonyListAllContentsEmptySlotSendsNoContentsRequest(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "slot1"), 0o755)
+	srv, c := connectRemote(t, ptpiptest.Options{Dir: dir, A6700: true})
+	before := srv.Ops.Load()
+	cs, err := c.SonyListAllContents(context.Background(), 1)
+	if err != nil || len(cs) != 0 || srv.Ops.Load()-before != 1 {
+		t.Fatalf("got %d contents, %d ops, err %v", len(cs), srv.Ops.Load()-before, err)
+	}
+}
+
+func TestSonyCardUnavailable(t *testing.T) {
+	_, c := connectRemote(t, ptpiptest.Options{Dir: manyFiles(t, 3), A6700: true, CardBusy: true})
+	ctx := context.Background()
+	_, err := c.SonyListAllContents(ctx, 1)
+	if !errors.Is(err, ptpip.ErrCardUnavailable) || !ptpip.IsCode(err, ptpip.RespOperationNotSupported) || errors.Is(err, ptpip.ErrSlotEmpty) {
+		t.Fatalf("list: %v", err)
+	}
+	if _, err := c.SonyGetContentsCompressed(ctx, 1, 1, 1, ptpip.SonyThumbnail, io.Discard); !errors.Is(err, ptpip.ErrCardUnavailable) {
+		t.Fatalf("thumbnail: %v", err)
+	}
+	// the session survives the refusal
+	if _, err := c.GetDeviceInfo(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 

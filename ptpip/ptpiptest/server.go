@@ -33,6 +33,7 @@ type Options struct {
 	A6700        bool   // emulate a6700 remote mode (implies Sony): storage ops fail until 0x9212(2,1,0); no GetPartialObject; 0x9211 instead; empty ModificationDate
 	IgnoreAfter  bool   // 0x923C always returns the first page (broken paging cursor)
 	NoRemote     bool   // A6700 without 0x923B-0x923D (legacy cameras: only ContentsTransfer mode)
+	CardBusy     bool   // 0x923B-0x923E answer OperationNotSupported (camera refuses card access right now)
 	Model        string // default "ILCE-6700"
 	SerialNumber string
 	Props        []ptpip.SonyProp // Sony extended properties (0x9209); default: a few small ones
@@ -697,6 +698,9 @@ func (s *Server) op(sess *session, op uint16, params []uint32) (uint16, []uint32
 	case ptpip.OpSonyGetCapturedDateList, ptpip.OpSonyGetContentsInfoList, ptpip.OpSonyGetContentsData, ptpip.OpSonyGetContentsCompressedData:
 		if !s.opts.A6700 || s.opts.NoRemote {
 			break
+		}
+		if s.opts.CardBusy {
+			return ptpip.RespOperationNotSupported, nil, nil, nil
 		}
 		return s.remote(op, params)
 	case ptpip.OpGetStorageIDs:

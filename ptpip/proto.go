@@ -94,6 +94,7 @@ const (
 	RespDeviceBusy            uint16 = 0x2019
 	RespStoreNotAvailable     uint16 = 0x2013
 	RespSpecByFormatUnsupp    uint16 = 0x2014
+	RespInvalidParameter      uint16 = 0x201D
 	RespSessionAlreadyOpen    uint16 = 0x201E
 )
 
